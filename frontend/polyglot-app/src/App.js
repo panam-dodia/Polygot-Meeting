@@ -137,6 +137,27 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
     }
   };
 
+  const clearChat = async () => {
+    if (window.confirm('Clear all messages in this room?')) {
+      try {
+        // Delete messages from S3 by overwriting with empty array
+        await fetch(`${API_CONFIG.API_URL}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action: 'clear',
+            roomId: roomId
+          })
+        });
+        setMessages([]);
+      } catch (error) {
+        console.error('Error clearing messages:', error);
+      }
+    }
+  };
+
   const handleRecordingToggle = () => {
     if (isRecording) {
       stopRecording();
@@ -149,8 +170,24 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
     <div className="conversation-room">
       <header className="room-header">
         <h2>Room: {roomId}</h2>
-        <div className="user-info">
-          {userName} ({userLanguage.toUpperCase()})
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <button 
+            onClick={clearChat} 
+            style={{
+              background: '#ef4444',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '0.9rem'
+            }}
+          >
+            🗑️ Clear Chat
+          </button>
+          <div className="user-info">
+            {userName} ({userLanguage.toUpperCase()})
+          </div>
         </div>
       </header>
 
@@ -188,7 +225,9 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
             </div>
             
             <div className="translations">
-              {Object.entries(msg.translations).map(([lang, text]) => (
+              {Object.entries(msg.translations)
+                .filter(([lang]) => lang === userLanguage)  // ✅ Only show user's language
+                .map(([lang, text]) => (
                 <div key={lang} className="translation-item">
                   <span className="lang-badge">{lang.toUpperCase()}</span>
                   <span className="translation-text">{text}</span>
