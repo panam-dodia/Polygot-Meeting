@@ -2,7 +2,7 @@ import { API_CONFIG } from './config';
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import { useAudioRecording } from './hooks/useAudioRecording';
-import { translateAudio, uploadAudioToS3, saveMessage, getRoomMessages } from './api';
+import { translateAudio, uploadAudioToS3, saveMessage, getRoomMessages, sendHeartbeat } from './api';
 
 function App() {
   const [roomId, setRoomId] = useState('');
@@ -62,18 +62,89 @@ function App() {
   );
 }
 
+// Helper function to generate avatar
+const getAvatar = (name) => {
+  if (!name) return { initials: '?', color: '#6b7280' };
+  
+  const initials = name
+    .split(' ')
+    .map(word => word[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+  
+  // Generate consistent color based on name
+  const colors = [
+    '#ef4444', '#f97316', '#f59e0b', '#eab308', 
+    '#84cc16', '#22c55e', '#10b981', '#14b8a6',
+    '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
+    '#8b5cf6', '#a855f7', '#d946ef', '#ec4899'
+  ];
+  
+  const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const color = colors[hash % colors.length];
+  
+  return { initials, color };
+};
+
 function ConversationRoom({ roomId, userName, userLanguage }) {
   const [messages, setMessages] = useState([]);
+  const [participants, setParticipants] = useState([]);  // ✅ ADD THIS
   const [isProcessing, setIsProcessing] = useState(false);
   const { isRecording, audioBlob, mimeType, startRecording, stopRecording } = useAudioRecording();
+
+  // Auto-clear old messages on first join
+  useEffect(() => {
+    const clearOldMessages = async () => {
+      await fetch(`${API_CONFIG.API_URL}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'clear',
+          roomId: roomId
+        })
+      });
+    };
+    
+    clearOldMessages();
+  }, [roomId]);
+
+  // Send heartbeat every 5 seconds to show active presence
+  useEffect(() => {
+    // Send initial heartbeat
+    sendHeartbeat(roomId, userName, userLanguage);
+    
+    // Send heartbeat every 5 seconds
+    const heartbeatInterval = setInterval(() => {
+      sendHeartbeat(roomId, userName, userLanguage);
+    }, 5000);
+    
+    // Cleanup on unmount
+    return () => clearInterval(heartbeatInterval);
+  }, [roomId, userName, userLanguage]);
 
   // Poll for new messages every 3 seconds
   useEffect(() => {
     const fetchMessages = async () => {
       console.log('Fetching messages for room:', roomId);
-      const roomMessages = await getRoomMessages(roomId);
-      console.log('Received messages:', roomMessages);
-      setMessages(roomMessages);
+      const response = await fetch(`${API_CONFIG.API_URL}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'get',
+          roomId: roomId
+        })
+      });
+      
+      const data = await response.json();
+      console.log('Received messages:', data.messages);
+      console.log('👥 Received participants:', data.participants);  // ✅ ADD THIS LINE
+      setMessages(data.messages || []);
+      setParticipants(data.participants || []);
     };
     
     // Initial fetch
@@ -169,7 +240,20 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
   return (
     <div className="conversation-room">
       <header className="room-header">
-        <h2>Room: {roomId}</h2>
+        <div>
+          <h2>Room: {roomId}</h2>
+          {/* ✅ ADD PARTICIPANT LIST */}
+          <div className="participants-list">
+            👥 {participants.length} {participants.length === 1 ? 'person' : 'people'}: 
+            {participants
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((p, idx) => (
+              <span key={idx} className="participant-badge">
+                {p.name} ({p.language?.toUpperCase()})
+              </span>
+            ))}
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <button 
             onClick={clearChat} 
@@ -180,7 +264,8 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
               padding: '0.5rem 1rem',
               borderRadius: '8px',
               cursor: 'pointer',
-              fontSize: '0.9rem'
+              fontSize: '0.9rem',
+              fontWeight: 'bold'
             }}
           >
             🗑️ Clear Chat
@@ -210,6 +295,13 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
           <div key={idx} className="message">
             <div className="message-header">
               <div className="speaker-info">
+                {/* ✅ ADD AVATAR */}
+                <div 
+                  className="avatar" 
+                  style={{ backgroundColor: getAvatar(msg.speaker).color }}
+                >
+                  {getAvatar(msg.speaker).initials}
+                </div>
                 <strong>{msg.speaker}</strong>
                 <span className="speaker-lang">
                   {msg.speakerLanguage?.toUpperCase()}

@@ -133,3 +133,24 @@ export const getRoomMessages = async (roomId) => {
     return [];
   }
 };
+
+// Send heartbeat to show active presence
+export const sendHeartbeat = async (roomId, userName, userLanguage) => {
+  try {
+    console.log('🔵 SENDING HEARTBEAT:', userName, userLanguage); // ✅ ADD THIS LINE
+    await fetch(`${API_CONFIG.API_URL}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'heartbeat',
+        roomId: roomId,
+        userName: userName,
+        userLanguage: userLanguage
+      })
+    });
+  } catch (error) {
+    console.error('Error sending heartbeat:', error);
+  }
+};
