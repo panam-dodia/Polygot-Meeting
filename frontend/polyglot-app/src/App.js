@@ -1,8 +1,8 @@
 import { API_CONFIG } from './config';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { useAudioRecording } from './hooks/useAudioRecording';
-import { translateAudio, uploadAudioToS3, saveMessage, getRoomMessages, sendHeartbeat } from './api';
+import { translateAudio, uploadAudioToS3, saveMessage, getRoomMessages, sendHeartbeat, getSummary } from './api';
 
 function App() {
   const [roomId, setRoomId] = useState('');
@@ -89,9 +89,22 @@ const getAvatar = (name) => {
 
 function ConversationRoom({ roomId, userName, userLanguage }) {
   const [messages, setMessages] = useState([]);
-  const [participants, setParticipants] = useState([]);  // ✅ ADD THIS
+  const [participants, setParticipants] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const { isRecording, audioBlob, mimeType, startRecording, stopRecording } = useAudioRecording();
+  const messagesEndRef = useRef(null);
+  const [copiedIndex, setCopiedIndex] = useState(null);
+  const [showSummary, setShowSummary] = useState(false);      // ✅ ADD THIS
+  const [summary, setSummary] = useState('');                 // ✅ ADD THIS
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);  // ✅ ADD THIS
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behaviou: 'smooth' });
+  }
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   // Auto-clear old messages on first join
   useEffect(() => {
@@ -114,16 +127,16 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
   // Send heartbeat every 5 seconds to show active presence
   useEffect(() => {
     // Send initial heartbeat
-    sendHeartbeat(roomId, userName, userLanguage);
+    sendHeartbeat(roomId, userName, userLanguage, isRecording);
     
     // Send heartbeat every 5 seconds
     const heartbeatInterval = setInterval(() => {
-      sendHeartbeat(roomId, userName, userLanguage);
+      sendHeartbeat(roomId, userName, userLanguage, isRecording);
     }, 5000);
     
     // Cleanup on unmount
     return () => clearInterval(heartbeatInterval);
-  }, [roomId, userName, userLanguage]);
+  }, [roomId, userName, userLanguage, isRecording]);  // ✅ ADD isRecording DEPENDENCY
 
   // Poll for new messages every 3 seconds
   useEffect(() => {
@@ -229,6 +242,20 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
     }
   };
 
+  const generateSummary = async () => {
+    if (messages.length === 0) {
+      alert('No messages to summarize!');
+      return;
+    }
+    
+    setIsLoadingSummary(true);
+    setShowSummary(true);
+    
+    const summaryText = await getSummary(messages, userLanguage);
+    setSummary(summaryText);
+    setIsLoadingSummary(false);
+  };
+
   const handleRecordingToggle = () => {
     if (isRecording) {
       stopRecording();
@@ -246,15 +273,40 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
           <div className="participants-list">
             👥 {participants.length} {participants.length === 1 ? 'person' : 'people'}: 
             {participants
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((p, idx) => (
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((p, idx) => (
               <span key={idx} className="participant-badge">
+                {p.isRecording && '🔴 '}  {/* ✅ ADD THIS LINE */}
                 {p.name} ({p.language?.toUpperCase()})
               </span>
             ))}
           </div>
+
+          {/* ✅ ADD THIS BLOCK - Show who's recording below participant list */}
+          {participants.filter(p => p.isRecording).length > 0 && (
+            <div className="recording-indicator">
+              🔴 {participants.filter(p => p.isRecording).map(p => p.name).join(', ')} {participants.filter(p => p.isRecording).length === 1 ? 'is' : 'are'} recording...
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <button 
+            onClick={generateSummary}
+            disabled={messages.length === 0}
+            style={{
+              background: '#8b5cf6',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
+              fontSize: '0.9rem',
+              fontWeight: 'bold',
+              opacity: messages.length === 0 ? 0.5 : 1
+            }}
+          >
+            📋 Summarize
+          </button>
           <button 
             onClick={clearChat} 
             style={{
@@ -336,6 +388,7 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
             </div>
           </div>
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="controls">
@@ -349,6 +402,26 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
            '🎤 Press to Speak'}
         </button>
       </div>
+      {showSummary && (
+        <div className="modal-overlay" onClick={() => setShowSummary(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>📋 Conversation Summary</h3>
+              <button className="close-button" onClick={() => setShowSummary(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {isLoadingSummary ? (
+                <div className="loading-summary">
+                  <div className="spinner"></div>
+                  <p>Generating summary...</p>
+                </div>
+              ) : (
+                <div className="summary-text">{summary}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

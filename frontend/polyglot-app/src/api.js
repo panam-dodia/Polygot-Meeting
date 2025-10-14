@@ -135,9 +135,9 @@ export const getRoomMessages = async (roomId) => {
 };
 
 // Send heartbeat to show active presence
-export const sendHeartbeat = async (roomId, userName, userLanguage) => {
+export const sendHeartbeat = async (roomId, userName, userLanguage, isRecording = false) => {
   try {
-    console.log('🔵 SENDING HEARTBEAT:', userName, userLanguage); // ✅ ADD THIS LINE
+    console.log('🔵 SENDING HEARTBEAT:', userName, userLanguage, 'Recording:', isRecording);
     await fetch(`${API_CONFIG.API_URL}/messages`, {
       method: 'POST',
       headers: {
@@ -147,10 +147,35 @@ export const sendHeartbeat = async (roomId, userName, userLanguage) => {
         action: 'heartbeat',
         roomId: roomId,
         userName: userName,
-        userLanguage: userLanguage
+        userLanguage: userLanguage,
+        isRecording: isRecording  // ✅ ADD THIS LINE
       })
     });
   } catch (error) {
     console.error('Error sending heartbeat:', error);
+  }
+};
+
+// Get conversation summary
+export const getSummary = async (messages, userLanguage) => {
+  try {
+    console.log('Getting summary...');
+    const response = await fetch(`${API_CONFIG.API_URL}/summary`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messages: messages,
+        language: userLanguage
+      })
+    });
+    
+    const data = await response.json();
+    console.log('Summary received:', data);
+    return data.summary || 'Could not generate summary';
+  } catch (error) {
+    console.error('Summary error:', error);
+    return 'Error generating summary';
   }
 };
