@@ -58,7 +58,7 @@ export const uploadAudioToS3 = async (audioBlob, mimeType = 'audio/webm') => {
   }
 };
 
-export const translateAudio = async (bucket, key, userLanguage = 'en') => {
+export const translateAudio = async (bucket, key, userLanguage = 'en', userName = 'Unknown') => {
   try {
     console.log('Calling API...');
     
@@ -70,7 +70,8 @@ export const translateAudio = async (bucket, key, userLanguage = 'en') => {
       body: JSON.stringify({
         bucket: bucket,
         key: key,
-        userLanguage: userLanguage  // Pass user's language
+        userLanguage: userLanguage,
+        userName: userName  // ✅ ADD THIS
       })
     });
     

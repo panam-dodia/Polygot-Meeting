@@ -1,8 +1,10 @@
 import { API_CONFIG } from './config';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
-import { useAudioRecording } from './hooks/useAudioRecording';
-import { translateAudio, uploadAudioToS3, saveMessage, getRoomMessages, sendHeartbeat, getSummary } from './api';
+import { useWebSocket } from './hooks/useWebSocket';
+import { useStreamingAudio } from './hooks/useStreamingAudio';
+import { uploadAudioToS3, sendHeartbeat, getSummary } from './api';
+import { CompanionMode } from './CompanionMode';  // ✅ ADD THIS IMPORT
 
 function App() {
   const [roomId, setRoomId] = useState('');
@@ -88,27 +90,47 @@ const getAvatar = (name) => {
 };
 
 function ConversationRoom({ roomId, userName, userLanguage }) {
+  // ✅ ALL STATE DECLARATIONS FIRST
   const [messages, setMessages] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const { isRecording, audioBlob, mimeType, startRecording, stopRecording } = useAudioRecording();
+  const [showSummary, setShowSummary] = useState(false);
+  const [summary, setSummary] = useState('');
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [chunkCount, setChunkCount] = useState(0);
+  const [companionMode, setCompanionMode] = useState(true); // ✅ DEFAULT TO COMPANION MODE
+  
   const messagesEndRef = useRef(null);
-  const [copiedIndex, setCopiedIndex] = useState(null);
-  const [showSummary, setShowSummary] = useState(false);      // ✅ ADD THIS
-  const [summary, setSummary] = useState('');                 // ✅ ADD THIS
-  const [isLoadingSummary, setIsLoadingSummary] = useState(false);  // ✅ ADD THIS
 
+  // ✅ ALL CALLBACKS AND EFFECTS SECOND
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behaviou: 'smooth' });
-  }
+    messagesEndRef.current?.scrollIntoView({ behaviour: 'smooth' });
+  };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // Auto-clear old messages on first join
+  const handleWebSocketMessage = useCallback((data) => {
+    console.log('📨 Received WebSocket data:', data);
+    
+    if (data.type === 'newMessage') {
+      setMessages(prev => [...prev, data.message]);
+    } else if (data.type === 'participantUpdate') {
+      setParticipants(data.participants || []);
+    } else if (data.type === 'allMessages') {
+      setMessages(data.messages || []);
+      setParticipants(data.participants || []);
+    } else if (data.type === 'chunkReceived') {
+      console.log(`✅ Chunk ${data.chunkId} received by server`);
+    }
+  }, []);
+
+  // Initialize room - clear and fetch messages
   useEffect(() => {
-    const clearOldMessages = async () => {
+    const initializeRoom = async () => {
+      // First clear old messages
       await fetch(`${API_CONFIG.API_URL}/messages`, {
         method: 'POST',
         headers: {
@@ -119,29 +141,11 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
           roomId: roomId
         })
       });
-    };
-    
-    clearOldMessages();
-  }, [roomId]);
-
-  // Send heartbeat every 5 seconds to show active presence
-  useEffect(() => {
-    // Send initial heartbeat
-    sendHeartbeat(roomId, userName, userLanguage, isRecording);
-    
-    // Send heartbeat every 5 seconds
-    const heartbeatInterval = setInterval(() => {
-      sendHeartbeat(roomId, userName, userLanguage, isRecording);
-    }, 5000);
-    
-    // Cleanup on unmount
-    return () => clearInterval(heartbeatInterval);
-  }, [roomId, userName, userLanguage, isRecording]);  // ✅ ADD isRecording DEPENDENCY
-
-  // Poll for new messages every 3 seconds
-  useEffect(() => {
-    const fetchMessages = async () => {
-      console.log('Fetching messages for room:', roomId);
+      
+      // Wait a bit to ensure clear completes
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Then fetch fresh messages (should be empty)
       const response = await fetch(`${API_CONFIG.API_URL}/messages`, {
         method: 'POST',
         headers: {
@@ -154,77 +158,76 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
       });
       
       const data = await response.json();
-      console.log('Received messages:', data.messages);
-      console.log('👥 Received participants:', data.participants);  // ✅ ADD THIS LINE
+      console.log('Received initial messages:', data.messages);
+      console.log('👥 Received initial participants:', data.participants);
       setMessages(data.messages || []);
       setParticipants(data.participants || []);
     };
     
-    // Initial fetch
-    fetchMessages();
-    
-    // Poll every 3 seconds
-    const interval = setInterval(fetchMessages, 3000);
-    
-    return () => clearInterval(interval);
+    initializeRoom();
   }, [roomId]);
 
-  // When audio is recorded, process it
+  // Send heartbeat every 5 seconds
   useEffect(() => {
-    if (audioBlob) {
-      processAudio(audioBlob);
-    }
-  }, [audioBlob]);
-
-  const processAudio = async (blob) => {
-    setIsProcessing(true);
+    sendHeartbeat(roomId, userName, userLanguage, isRecording);
     
-    try {
-      console.log('Processing audio, size:', blob.size);
-      
-      // Step 1: Upload audio to S3
-      console.log('Uploading to S3...');
-      const fileName = await uploadAudioToS3(blob, mimeType);
-      console.log('Uploaded:', fileName);
-      
-      // Step 2: Translate the uploaded audio
-      console.log('Translating...');
-      const result = await translateAudio(
-        API_CONFIG.BUCKET,
-        fileName,
-        userLanguage
-      );
-      
-      console.log('Translation result:', result);
-      
-      // Step 3: Save message to room
-      const newMessage = {
-        speaker: userName,
-        speakerLanguage: userLanguage,
-        original: result.original_text,
-        translations: result.translations,
-        audioUrls: result.audio_urls || {}
-      };
-      
-      console.log('Attempting to save message:', newMessage);
-      await saveMessage(roomId, newMessage);
-      console.log('Message save completed');
+    const heartbeatInterval = setInterval(() => {
+      sendHeartbeat(roomId, userName, userLanguage, isRecording);
+    }, 5000);
+    
+    return () => clearInterval(heartbeatInterval);
+  }, [roomId, userName, userLanguage, isRecording]);
 
-// Messages will update automatically via polling      
-      // Messages will update automatically via polling
+  const { isConnected, sendMessage: sendWebSocketMessage } = useWebSocket(roomId, handleWebSocketMessage);
+
+  const handleAudioChunk = useCallback(async (audioBlob, mimeType) => {
+    if (!isConnected) {
+      console.warn('WebSocket not connected, cannot send chunk');
+      return;
+    }
+
+    try {
+      const chunkId = Date.now();
+      setChunkCount(prev => prev + 1);
+      
+      console.log(`📤 Uploading chunk ${chunkCount + 1} to S3...`);
+      
+      const fileName = await uploadAudioToS3(audioBlob, mimeType);
+      
+      console.log(`✅ Uploaded to S3: ${fileName}`);
+      
+      sendWebSocketMessage({
+        action: 'streamAudio',
+        s3Key: fileName,
+        language: userLanguage,
+        chunkId: chunkId,
+        roomId: roomId,
+        userName: userName
+      });
+      
+      console.log(`📤 Sent chunk ${chunkCount + 1} notification`);
       
     } catch (error) {
-      console.error('Error processing audio:', error);
-      alert('Translation failed: ' + error.message);
-    } finally {
-      setIsProcessing(false);
+      console.error('Error processing chunk:', error);
+    }
+  }, [isConnected, sendWebSocketMessage, userLanguage, roomId, userName, chunkCount]);
+
+  const streamingAudio = useStreamingAudio(handleAudioChunk);
+
+  const handleRecordingToggle = () => {
+    if (isRecording) {
+      streamingAudio.stopRecording();
+      setIsRecording(false);
+      setChunkCount(0);
+    } else {
+      streamingAudio.startRecording();
+      setIsRecording(true);
     }
   };
 
   const clearChat = async () => {
     if (window.confirm('Clear all messages in this room?')) {
       try {
-        // Delete messages from S3 by overwriting with empty array
         await fetch(`${API_CONFIG.API_URL}/messages`, {
           method: 'POST',
           headers: {
@@ -256,33 +259,37 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
     setIsLoadingSummary(false);
   };
 
-  const handleRecordingToggle = () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
-  };
+  // ✅ CONDITIONAL RENDERING AT THE END
+  if (companionMode) {
+    return (
+      <CompanionMode
+        messages={messages}
+        userLanguage={userLanguage}
+        isRecording={isRecording}
+        onToggleRecording={handleRecordingToggle}
+        participants={participants}
+      />
+    );
+  }
 
+  // Normal mode UI
   return (
     <div className="conversation-room">
       <header className="room-header">
         <div>
           <h2>Room: {roomId}</h2>
-          {/* ✅ ADD PARTICIPANT LIST */}
           <div className="participants-list">
             👥 {participants.length} {participants.length === 1 ? 'person' : 'people'}: 
             {participants
               .sort((a, b) => a.name.localeCompare(b.name))
               .map((p, idx) => (
               <span key={idx} className="participant-badge">
-                {p.isRecording && '🔴 '}  {/* ✅ ADD THIS LINE */}
+                {p.isRecording && '🔴 '}
                 {p.name} ({p.language?.toUpperCase()})
               </span>
             ))}
           </div>
 
-          {/* ✅ ADD THIS BLOCK - Show who's recording below participant list */}
           {participants.filter(p => p.isRecording).length > 0 && (
             <div className="recording-indicator">
               🔴 {participants.filter(p => p.isRecording).map(p => p.name).join(', ')} {participants.filter(p => p.isRecording).length === 1 ? 'is' : 'are'} recording...
@@ -322,6 +329,20 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
           >
             🗑️ Clear Chat
           </button>
+          {!isConnected && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem',
+              padding: '0.5rem 1rem',
+              background: '#ef4444',
+              borderRadius: '20px',
+              fontSize: '0.85rem',
+              animation: 'pulse 1s infinite'
+            }}>
+              🔴 Connection Lost - Reconnecting...
+            </div>
+          )}
           <div className="user-info">
             {userName} ({userLanguage.toUpperCase()})
           </div>
@@ -342,12 +363,11 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
         )}
 
         {messages
-          .filter(msg => msg.speaker && msg.original && msg.translations)  // Filter out null messages
+          .filter(msg => msg.speaker && msg.original && msg.translations)
           .map((msg, idx) => (
           <div key={idx} className="message">
             <div className="message-header">
               <div className="speaker-info">
-                {/* ✅ ADD AVATAR */}
                 <div 
                   className="avatar" 
                   style={{ backgroundColor: getAvatar(msg.speaker).color }}
@@ -370,7 +390,7 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
             
             <div className="translations">
               {Object.entries(msg.translations)
-                .filter(([lang]) => lang === userLanguage)  // ✅ Only show user's language
+                .filter(([lang]) => lang === userLanguage)
                 .map(([lang, text]) => (
                 <div key={lang} className="translation-item">
                   <span className="lang-badge">{lang.toUpperCase()}</span>
@@ -402,6 +422,7 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
            '🎤 Press to Speak'}
         </button>
       </div>
+      
       {showSummary && (
         <div className="modal-overlay" onClick={() => setShowSummary(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
