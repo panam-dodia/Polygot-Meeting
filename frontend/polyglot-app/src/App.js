@@ -388,23 +388,19 @@ function ConversationRoom({ roomId, userName, userLanguage }) {
               📝 Original: {msg.original}
             </div>
             
-            <div className="translations">
-              {Object.entries(msg.translations)
-                .filter(([lang]) => lang === userLanguage)
-                .map(([lang, text]) => (
-                <div key={lang} className="translation-item">
-                  <span className="lang-badge">{lang.toUpperCase()}</span>
-                  <span className="translation-text">{text}</span>
-                  
-                  {msg.audioUrls && msg.audioUrls[lang] && (
-                    <div className="audio-player">
-                      <audio controls src={msg.audioUrls[lang]}>
-                        Your browser does not support the audio element.
-                      </audio>
-                    </div>
-                  )}
+            <div className="translation-item">
+              <span className="lang-badge">{userLanguage.toUpperCase()}</span>
+              <span className="translation-text">
+                {msg.translations[userLanguage] || msg.original}
+              </span>
+              
+              {msg.audioUrls && msg.audioUrls[userLanguage] && (
+                <div className="audio-player">
+                  <audio controls src={msg.audioUrls[userLanguage]}>
+                    Your browser does not support the audio element.
+                  </audio>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         ))}

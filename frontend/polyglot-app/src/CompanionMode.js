@@ -194,7 +194,7 @@ export const CompanionMode = ({
                 TRANSLATION:
               </div>
               <div style={{ fontSize: '1.5rem', fontWeight: 'bold', lineHeight: '1.6' }}>
-                "{latestMessage.translations[userLanguage]}"
+                "{latestMessage.translations[userLanguage] || latestMessage.original}"
               </div>
             </div>
 
