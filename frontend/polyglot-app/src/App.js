@@ -1,444 +1,304 @@
-import { API_CONFIG } from './config';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import './App.css';
-import { useWebSocket } from './hooks/useWebSocket';
-import { useStreamingAudio } from './hooks/useStreamingAudio';
-import { uploadAudioToS3, sendHeartbeat, getSummary } from './api';
-import { CompanionMode } from './CompanionMode';  // ✅ ADD THIS IMPORT
+import useRealtimeTranscription from './hooks/useRealtimeTranscription';
 
 function App() {
-  const [roomId, setRoomId] = useState('');
+  const [joined, setJoined] = useState(false);
   const [userName, setUserName] = useState('');
-  const [userLanguage, setUserLanguage] = useState('en');
-  const [isInRoom, setIsInRoom] = useState(false);
+  const [roomId, setRoomId] = useState('');
+  const [speakLanguage, setSpeakLanguage] = useState('en'); // ✅ Changed from sourceLanguage
+  const [hearLanguage, setHearLanguage] = useState('en');   // ✅ Changed from selectedLanguage
+  const [selectedMode, setSelectedMode] = useState('youtube');
+  const [participants, setParticipants] = useState([]); // ✅ NEW
+  
+  const currentAudioRef = useRef(null);
 
-  const joinRoom = () => {
-    if (roomId && userName && userLanguage) {
-      setIsInRoom(true);
+  const {
+    isConnected,
+    transcripts,
+    startCapture,
+    stopCapture,
+    isCapturing,
+    captureMode,
+    onParticipantsUpdate // ✅ NEW
+  } = useRealtimeTranscription(userName, roomId, speakLanguage, hearLanguage, joined, setParticipants);
+
+  const handleJoinRoom = (e) => {
+    e.preventDefault();
+    if (userName && roomId && speakLanguage && hearLanguage) {
+      setJoined(true);
     }
   };
 
-  if (isInRoom) {
-    return <ConversationRoom 
-      roomId={roomId} 
-      userName={userName} 
-      userLanguage={userLanguage} 
-    />;
+  const handleLeaveRoom = () => {
+    stopCapture();
+    setJoined(false);
+    setParticipants([]);
+  };
+
+  const handleAudioPlay = (audioElement) => {
+    if (currentAudioRef.current && currentAudioRef.current !== audioElement) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.currentTime = 0;
+    }
+    currentAudioRef.current = audioElement;
+  };
+
+  const languageNames = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'hi': 'Hindi'
+  };
+
+  // ✅ NEW: Sort participants - current user first, then alphabetically
+  const sortedParticipants = [...participants].sort((a, b) => {
+    if (a.userName === userName) return -1;
+    if (b.userName === userName) return 1;
+    return a.userName.localeCompare(b.userName);
+  });
+
+  if (!joined) {
+    return (
+      <div className="App">
+        <div className="join-container">
+          <h1>🌍 Polyglot</h1>
+          <p className="subtitle">Real-Time Translation</p>
+          
+          <form onSubmit={handleJoinRoom} className="join-form">
+            <div className="form-group">
+              <label>👤 Your Name</label>
+              <input
+                type="text"
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
+                placeholder="Enter your name"
+                required
+              />
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label>🗣️ Your language (speak & hear)</label>
+                <select 
+                  value={hearLanguage} 
+                  onChange={(e) => {
+                    setHearLanguage(e.target.value);
+                    setSpeakLanguage(e.target.value);
+                  }}
+                >
+                  <option value="en">🇺🇸 English</option>
+                  <option value="es">🇪🇸 Spanish</option>
+                  <option value="fr">🇫🇷 French</option>
+                  <option value="hi">🇮🇳 Hindi</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>🌐 Others speak (translate from)</label>
+                <select 
+                  value={speakLanguage} 
+                  onChange={(e) => setSpeakLanguage(e.target.value)}
+                >
+                  <option value="en">🇺🇸 English</option>
+                  <option value="es">🇪🇸 Spanish</option>
+                  <option value="fr">🇫🇷 French</option>
+                  <option value="hi">🇮🇳 Hindi</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>🚪 Room ID</label>
+              <input
+                type="text"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value)}
+                placeholder="Enter room ID"
+                required
+              />
+            </div>
+
+            <button type="submit" className="primary-button">
+              Join Conversation
+            </button>
+          </form>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="App">
-      <header className="App-header">
-        <h1>🌍 Polyglot</h1>
-        <p>Real-Time Multi-Language Conversation</p>
-        
-        <div className="join-form">
-          <input
-            type="text"
-            placeholder="Your name"
-            value={userName}
-            onChange={(e) => setUserName(e.target.value)}
-          />
-          
-          <select 
-            value={userLanguage} 
-            onChange={(e) => setUserLanguage(e.target.value)}
-          >
-            <option value="en">English</option>
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-            <option value="hi">Hindi</option>
-          </select>
-          
-          <input
-            type="text"
-            placeholder="Room ID (e.g., demo-123)"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-          />
-          
-          <button onClick={joinRoom}>Join Conversation</button>
+      <div className="header-bar">
+        <div className="header-left">
+          <h2>🌍 Polyglot</h2>
+          <span className="room-info">Room: {roomId}</span>
         </div>
-      </header>
-    </div>
-  );
-}
+        <div className="header-right">
+          <span className="user-info">👤 {userName}</span>
+          <span className={`status ${isConnected ? 'connected' : 'disconnected'}`}>
+            {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          </span>
+          <button onClick={handleLeaveRoom} className="leave-button">
+            Leave Room
+          </button>
+        </div>
+      </div>
 
-// Helper function to generate avatar
-const getAvatar = (name) => {
-  if (!name) return { initials: '?', color: '#6b7280' };
-  
-  const initials = name
-    .split(' ')
-    .map(word => word[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-  
-  // Generate consistent color based on name
-  const colors = [
-    '#ef4444', '#f97316', '#f59e0b', '#eab308', 
-    '#84cc16', '#22c55e', '#10b981', '#14b8a6',
-    '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
-    '#8b5cf6', '#a855f7', '#d946ef', '#ec4899'
-  ];
-  
-  const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const color = colors[hash % colors.length];
-  
-  return { initials, color };
-};
-
-function ConversationRoom({ roomId, userName, userLanguage }) {
-  // ✅ ALL STATE DECLARATIONS FIRST
-  const [messages, setMessages] = useState([]);
-  const [participants, setParticipants] = useState([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
-  const [summary, setSummary] = useState('');
-  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [chunkCount, setChunkCount] = useState(0);
-  const [companionMode, setCompanionMode] = useState(true); // ✅ DEFAULT TO COMPANION MODE
-  
-  const messagesEndRef = useRef(null);
-
-  // ✅ ALL CALLBACKS AND EFFECTS SECOND
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behaviour: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const handleWebSocketMessage = useCallback((data) => {
-    console.log('📨 Received WebSocket data:', data);
-    
-    if (data.type === 'newMessage') {
-      setMessages(prev => [...prev, data.message]);
-    } else if (data.type === 'participantUpdate') {
-      setParticipants(data.participants || []);
-    } else if (data.type === 'allMessages') {
-      setMessages(data.messages || []);
-      setParticipants(data.participants || []);
-    } else if (data.type === 'chunkReceived') {
-      console.log(`✅ Chunk ${data.chunkId} received by server`);
-    }
-  }, []);
-
-  // Initialize room - clear and fetch messages
-  useEffect(() => {
-    const initializeRoom = async () => {
-      // First clear old messages
-      await fetch(`${API_CONFIG.API_URL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'clear',
-          roomId: roomId
-        })
-      });
-      
-      // Wait a bit to ensure clear completes
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Then fetch fresh messages (should be empty)
-      const response = await fetch(`${API_CONFIG.API_URL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'get',
-          roomId: roomId
-        })
-      });
-      
-      const data = await response.json();
-      console.log('Received initial messages:', data.messages);
-      console.log('👥 Received initial participants:', data.participants);
-      setMessages(data.messages || []);
-      setParticipants(data.participants || []);
-    };
-    
-    initializeRoom();
-  }, [roomId]);
-
-  // Send heartbeat every 5 seconds
-  useEffect(() => {
-    sendHeartbeat(roomId, userName, userLanguage, isRecording);
-    
-    const heartbeatInterval = setInterval(() => {
-      sendHeartbeat(roomId, userName, userLanguage, isRecording);
-    }, 5000);
-    
-    return () => clearInterval(heartbeatInterval);
-  }, [roomId, userName, userLanguage, isRecording]);
-
-  const { isConnected, sendMessage: sendWebSocketMessage } = useWebSocket(roomId, handleWebSocketMessage);
-
-  const handleAudioChunk = useCallback(async (audioBlob, mimeType) => {
-    if (!isConnected) {
-      console.warn('WebSocket not connected, cannot send chunk');
-      return;
-    }
-
-    try {
-      const chunkId = Date.now();
-      setChunkCount(prev => prev + 1);
-      
-      console.log(`📤 Uploading chunk ${chunkCount + 1} to S3...`);
-      
-      const fileName = await uploadAudioToS3(audioBlob, mimeType);
-      
-      console.log(`✅ Uploaded to S3: ${fileName}`);
-      
-      sendWebSocketMessage({
-        action: 'streamAudio',
-        s3Key: fileName,
-        language: userLanguage,
-        chunkId: chunkId,
-        roomId: roomId,
-        userName: userName
-      });
-      
-      console.log(`📤 Sent chunk ${chunkCount + 1} notification`);
-      
-    } catch (error) {
-      console.error('Error processing chunk:', error);
-    }
-  }, [isConnected, sendWebSocketMessage, userLanguage, roomId, userName, chunkCount]);
-
-  const streamingAudio = useStreamingAudio(handleAudioChunk);
-
-  const handleRecordingToggle = () => {
-    if (isRecording) {
-      streamingAudio.stopRecording();
-      setIsRecording(false);
-      setChunkCount(0);
-    } else {
-      streamingAudio.startRecording();
-      setIsRecording(true);
-    }
-  };
-
-  const clearChat = async () => {
-    if (window.confirm('Clear all messages in this room?')) {
-      try {
-        await fetch(`${API_CONFIG.API_URL}/messages`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            action: 'clear',
-            roomId: roomId
-          })
-        });
-        setMessages([]);
-      } catch (error) {
-        console.error('Error clearing messages:', error);
-      }
-    }
-  };
-
-  const generateSummary = async () => {
-    if (messages.length === 0) {
-      alert('No messages to summarize!');
-      return;
-    }
-    
-    setIsLoadingSummary(true);
-    setShowSummary(true);
-    
-    const summaryText = await getSummary(messages, userLanguage);
-    setSummary(summaryText);
-    setIsLoadingSummary(false);
-  };
-
-  // ✅ CONDITIONAL RENDERING AT THE END
-  if (companionMode) {
-    return (
-      <CompanionMode
-        messages={messages}
-        userLanguage={userLanguage}
-        isRecording={isRecording}
-        onToggleRecording={handleRecordingToggle}
-        participants={participants}
-      />
-    );
-  }
-
-  // Normal mode UI
-  return (
-    <div className="conversation-room">
-      <header className="room-header">
-        <div>
-          <h2>Room: {roomId}</h2>
+      <div className="main-content">
+        {/* ✅ Participants Panel - Make sure this is here */}
+        <div className="participants-panel">
+          <h3>👥 Participants ({participants.length})</h3>
           <div className="participants-list">
-            👥 {participants.length} {participants.length === 1 ? 'person' : 'people'}: 
-            {participants
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((p, idx) => (
-              <span key={idx} className="participant-badge">
-                {p.isRecording && '🔴 '}
-                {p.name} ({p.language?.toUpperCase()})
-              </span>
+            {sortedParticipants.length === 0 ? (
+              <p style={{color: '#999', textAlign: 'center'}}>No participants yet</p>
+            ) : (
+              sortedParticipants.map((participant, index) => (
+                <div 
+                  key={index} 
+                  className={`participant-card ${participant.userName === userName ? 'current-user' : ''}`}
+                >
+                  <div className="participant-name">
+                    {participant.userName === userName && '👤 '}
+                    {participant.userName}
+                  </div>
+                  <div className="participant-languages">
+                    <span className="hear-lang">🗣️ {languageNames[participant.hearLanguage]}</span>
+                    <span className="speak-lang">← 🌐 {languageNames[participant.speakLanguage]}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="controls-section">
+          <div className="language-display">
+            <div className="lang-badge target">
+              Your language: {languageNames[hearLanguage]}
+            </div>
+            <span className="arrow">←</span>
+            <div className="lang-badge source">
+              Translating from: {languageNames[speakLanguage]}
+            </div>
+          </div>
+
+          {!isCapturing && (
+            <div className="mode-selector">
+              <label className="mode-label">📍 Select Mode:</label>
+              <div className="mode-buttons">
+                <button 
+                  className={`mode-button ${selectedMode === 'youtube' ? 'active' : ''}`}
+                  onClick={() => setSelectedMode('youtube')}
+                >
+                  🎬 YouTube Mode
+                </button>
+                <button 
+                  className={`mode-button ${selectedMode === 'microphone' ? 'active' : ''}`}
+                  onClick={() => setSelectedMode('microphone')}
+                >
+                  🎤 Conversation Mode
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!isCapturing ? (
+            <button onClick={() => startCapture(selectedMode)} className="primary-button">
+              {selectedMode === 'youtube' ? '🎬 Start YouTube Translation' : '🎤 Start Conversation'}
+            </button>
+          ) : (
+            <div className="capturing-state">
+              <div className="mode-indicator">
+                {captureMode === 'youtube' ? '🎬 YouTube Mode Active' : '🎤 Microphone Active'}
+              </div>
+              <button onClick={stopCapture} className="stop-button">
+                ⏹️ Stop Translation
+              </button>
+            </div>
+          )}
+
+          <div className="instructions-box">
+            <details>
+              <summary>ℹ️ How to use</summary>
+              {selectedMode === 'youtube' ? (
+                <ol>
+                  <li>Open YouTube in another tab</li>
+                  <li>Click "Start YouTube Translation"</li>
+                  <li>Select the YouTube tab</li>
+                  <li>✅ Check "Share audio"</li>
+                  <li>Click "Share"</li>
+                </ol>
+              ) : (
+                <ol>
+                  <li>Click "Start Conversation"</li>
+                  <li>Allow microphone access</li>
+                  <li>Start speaking in your language</li>
+                  <li>Others will hear the translation</li>
+                </ol>
+              )}
+            </details>
+          </div>
+        </div>
+
+        <div className="transcripts-section">
+          <h3>📜 Live Transcripts ({transcripts.length})</h3>
+          
+          {transcripts.length === 0 && (
+            <div className="empty-state">
+              <p>No transcripts yet. Start capturing audio to see translations!</p>
+            </div>
+          )}
+
+          <div className="transcripts-list">
+            {transcripts.map((transcript, index) => (
+              <div key={index} className="transcript-card">
+                <div className="transcript-header">
+                  <span className="transcript-number">#{transcripts.length - index}</span>
+                  <span className="transcript-speaker">
+                    🗣️ {transcript.speaker || 'Unknown'}
+                  </span>
+                  <span className="transcript-lang">
+                    {languageNames[transcript.speakerLanguage] || 'Unknown'}
+                  </span>
+                </div>
+
+                <div className="transcript-body">
+                  <div className="original-section">
+                    <label>Original:</label>
+                    <p className="original-text">{transcript.original}</p>
+                  </div>
+
+                  <div className="translation-section">
+                    <label>Translation ({languageNames[hearLanguage]}):</label>
+                    <p className="translation-text">
+                      {transcript.translation || 'Translating...'}
+                    </p>
+                  </div>
+
+                  {transcript.audioUrl && (
+                    <div className="audio-section">
+                      <audio 
+                        src={transcript.audioUrl}
+                        autoPlay={index === 0}
+                        controls
+                        onPlay={(e) => handleAudioPlay(e.target)}
+                        onLoadedData={(e) => {
+                          if (index === 0) {
+                            e.target.play().catch(err => console.log('Auto-play blocked:', err));
+                          }
+                        }}
+                      />
+                      <p className="audio-label">🔊 Audio ready</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
-
-          {participants.filter(p => p.isRecording).length > 0 && (
-            <div className="recording-indicator">
-              🔴 {participants.filter(p => p.isRecording).map(p => p.name).join(', ')} {participants.filter(p => p.isRecording).length === 1 ? 'is' : 'are'} recording...
-            </div>
-          )}
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <button 
-            onClick={generateSummary}
-            disabled={messages.length === 0}
-            style={{
-              background: '#8b5cf6',
-              color: 'white',
-              border: 'none',
-              padding: '0.5rem 1rem',
-              borderRadius: '8px',
-              cursor: messages.length === 0 ? 'not-allowed' : 'pointer',
-              fontSize: '0.9rem',
-              fontWeight: 'bold',
-              opacity: messages.length === 0 ? 0.5 : 1
-            }}
-          >
-            📋 Summarize
-          </button>
-          <button 
-            onClick={clearChat} 
-            style={{
-              background: '#ef4444',
-              color: 'white',
-              border: 'none',
-              padding: '0.5rem 1rem',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              fontWeight: 'bold'
-            }}
-          >
-            🗑️ Clear Chat
-          </button>
-          {!isConnected && (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.5rem',
-              padding: '0.5rem 1rem',
-              background: '#ef4444',
-              borderRadius: '20px',
-              fontSize: '0.85rem',
-              animation: 'pulse 1s infinite'
-            }}>
-              🔴 Connection Lost - Reconnecting...
-            </div>
-          )}
-          <div className="user-info">
-            {userName} ({userLanguage.toUpperCase()})
-          </div>
-        </div>
-      </header>
-
-      <div className="messages-container">
-        {isProcessing && (
-          <div className="processing">⏳ Translating...</div>
-        )}
-        
-        {messages.filter(msg => msg.speaker && msg.original && msg.translations).length === 0 && !isProcessing && (
-          <div className="empty-state">
-            <div className="empty-icon">🎤</div>
-            <h3>No messages yet</h3>
-            <p>Press the button below to start speaking</p>
-          </div>
-        )}
-
-        {messages
-          .filter(msg => msg.speaker && msg.original && msg.translations)
-          .map((msg, idx) => (
-          <div key={idx} className="message">
-            <div className="message-header">
-              <div className="speaker-info">
-                <div 
-                  className="avatar" 
-                  style={{ backgroundColor: getAvatar(msg.speaker).color }}
-                >
-                  {getAvatar(msg.speaker).initials}
-                </div>
-                <strong>{msg.speaker}</strong>
-                <span className="speaker-lang">
-                  {msg.speakerLanguage?.toUpperCase()}
-                </span>
-              </div>
-              <span className="timestamp">
-                {new Date(msg.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            
-            <div className="original">
-              📝 Original: {msg.original}
-            </div>
-            
-            <div className="translation-item">
-              <span className="lang-badge">{userLanguage.toUpperCase()}</span>
-              <span className="translation-text">
-                {msg.translations[userLanguage] || msg.original}
-              </span>
-              
-              {msg.audioUrls && msg.audioUrls[userLanguage] && (
-                <div className="audio-player">
-                  <audio controls src={msg.audioUrls[userLanguage]}>
-                    Your browser does not support the audio element.
-                  </audio>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
       </div>
-
-      <div className="controls">
-        <button 
-          className={isRecording ? 'recording' : ''}
-          onClick={handleRecordingToggle}
-          disabled={isProcessing}
-        >
-          {isProcessing ? '⏳ Processing...' : 
-           isRecording ? '🔴 Stop Recording' : 
-           '🎤 Press to Speak'}
-        </button>
-      </div>
-      
-      {showSummary && (
-        <div className="modal-overlay" onClick={() => setShowSummary(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>📋 Conversation Summary</h3>
-              <button className="close-button" onClick={() => setShowSummary(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              {isLoadingSummary ? (
-                <div className="loading-summary">
-                  <div className="spinner"></div>
-                  <p>Generating summary...</p>
-                </div>
-              ) : (
-                <div className="summary-text">{summary}</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

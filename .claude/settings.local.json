@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(aws ecs list-clusters:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
