@@ -79,13 +79,10 @@ function App() {
 
             <div className="form-row">
               <div className="form-group">
-                <label>🗣️ Your language (speak & hear)</label>
+                <label>🗣️ I speak (my language)</label>  {/* ✅ CLEAR! */}
                 <select 
                   value={hearLanguage} 
-                  onChange={(e) => {
-                    setHearLanguage(e.target.value);
-                    setSpeakLanguage(e.target.value);
-                  }}
+                  onChange={(e) => setHearLanguage(e.target.value)}
                 >
                   <option value="en">🇺🇸 English</option>
                   <option value="es">🇪🇸 Spanish</option>
@@ -95,7 +92,7 @@ function App() {
               </div>
 
               <div className="form-group">
-                <label>🌐 Others speak (translate from)</label>
+                <label>👂 Others speak (translate to)</label>  {/* ✅ CLEAR! */}
                 <select 
                   value={speakLanguage} 
                   onChange={(e) => setSpeakLanguage(e.target.value)}

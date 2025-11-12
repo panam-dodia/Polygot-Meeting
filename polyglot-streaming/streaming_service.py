@@ -232,8 +232,8 @@ async def handle_client(websocket, path):
         init_data = json.loads(init_msg)
         
         session_id = init_data['sessionId']
-        source_lang = init_data.get('sourceLanguage', 'en')
-        user_lang = init_data['userLanguage']
+        source_lang = init_data['userLanguage']
+        user_lang = init_data.get('targetLanguage', 'en')
         room_id = init_data.get('roomId', 'test')
         user_name = init_data.get('userName', 'User')
         
@@ -299,6 +299,13 @@ async def handle_client(websocket, path):
         print(f"❌ [{session_id}] Error: {e}")
         import traceback
         traceback.print_exc()
+        
+        # ✅ Don't disconnect on timeout - keep connection alive
+        if "timed out" in str(e):
+            print(f"⚠️ Timeout for {session_id}, but keeping WebSocket open")
+            # Don't close websocket, just log it
+        else:
+            raise  # Only raise for real errors
     
     finally:
         # Remove user from room

@@ -13,7 +13,7 @@ const useRealtimeTranscription = (userName, roomId, speakLanguage, hearLanguage,
   useEffect(() => {
     if (!joined) return;
 
-    const ws = new WebSocket('ws://3.80.60.240:8080');  // ✅ Update with your IP
+    const ws = new WebSocket('ws://3.92.200.208:8080');
     
     ws.onopen = () => {
       console.log('✅ Connected to AWS ECS streaming service');
@@ -23,8 +23,8 @@ const useRealtimeTranscription = (userName, roomId, speakLanguage, hearLanguage,
         sessionId: `session-${Date.now()}`,
         roomId: roomId,
         userName: userName,
-        sourceLanguage: speakLanguage,
-        userLanguage: hearLanguage
+        userLanguage: hearLanguage,      // ✅ What THIS user speaks
+        targetLanguage: speakLanguage    // ✅ What THIS user wants to hear (from others)
       };
       
       console.log('📤 Sending init message:', initMessage);
@@ -141,9 +141,16 @@ const useRealtimeTranscription = (userName, roomId, speakLanguage, hearLanguage,
 
         const inputData = e.inputBuffer.getChannelData(0);
         
-        // Always send audio data - this keeps the connection alive
+        // ✅ DEBUG: Check if audio has signal
+        const hasSound = inputData.some(sample => Math.abs(sample) > 0.01);
+        if (hasSound) {
+          console.log('🎤 Audio detected!');
+        }
+        
         const pcm16 = convertToPCM16(inputData);
         const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pcm16)));
+        
+        console.log('📤 Sending', pcm16.byteLength, 'bytes');  // ✅ DEBUG
         wsRef.current.send(base64);
       };
 
